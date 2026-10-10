@@ -8,6 +8,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, Message
 from dotenv import load_dotenv
 
+from agent import run_analysis
+
 load_dotenv()
 
 TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY", "")
@@ -31,17 +33,15 @@ WELCOME = (
     "Привет! Я - ИИ-аналитик данных.\n\n"
     "Пришли датасет (CSV, TSV или Excel), и я как агент сам исследую его: "
     "посчитаю метрики, найду инсайды, построю графики и пришлю отчёт.\n\n"
-    "Можешь добавить инструкцию - что важно (подписью к файлу или сообщением "
-    "перед ним). \n\n/help - подробнее."
+    "Можешь добавить инструкцию - что важно."
+    "\n\n/help - подробнее."
 )
 
 HELP = (
     "Как пользоваться:\n"
     f"1) Пришли файл CSV/TSV/XLSX/XLS\n"
     "2) По желанию добавь инструкцию подписью к файлу\n"
-    "3) Подожди пару минут - пришлю отчёт и графики.\n\n"
-    "Внутри: модель не пересказывает готовые цифры, а сама пишет и выполняет "
-    "Python в песочнице (pandas, matplotlib) и итеративно строит анализ.\n\n"
+    "3) Подожди пару минут - пришлю отчёт и графики.0"
 )
 
 
@@ -64,9 +64,7 @@ async def on_document(message: Message):
         await message.answer(err)
         return
 
-    instruction = message.caption
-    if not instruction:
-        instruction = ""
+    instruction = message.caption or ""
 
     session_dir = tempfile.mkdtemp(prefix="analysis_")
     data_path = os.path.join(session_dir, doc.file_name)
@@ -76,6 +74,26 @@ async def on_document(message: Message):
         await message.answer(f"Не удалось скачать файл: {exc}")
         shutil.rmtree(session_dir, ignore_errors=True)
         return
+
+    prefix = ""
+
+    status = await message.answer("Анализирую данные… это может занять пару минут.")
+
+    try:
+
+        async with analysis_semaphore:
+            result = await asyncio.to_thread(
+                run_analysis, data_path, session_dir, instruction)
+        await _send_report(message, prefix + result["report"], result["images"])
+
+    except Exception as exc:
+        await message.answer(f"Произошла ошибка при анализе: {exc}")
+    finally:
+        try:
+            await status.delete()
+        except Exception:
+            pass
+        shutil.rmtree(session_dir, ignore_errors=True)
 
 @dp.message(F.text & ~F.text.startswith("/"))
 async def on_text(message: Message):
