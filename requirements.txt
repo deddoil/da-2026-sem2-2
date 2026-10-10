@@ -1,0 +1,9 @@
+numpy
+pandas
+openai
+aiogram
+python-dotenv
+matplotlib
+seaborn
+openpyxl
+xlrd
